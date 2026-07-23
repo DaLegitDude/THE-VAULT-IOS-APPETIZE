@@ -1,0 +1,237 @@
+name: Build Vault iOS App
+
+# Compiling and signing an iOS app requires real Xcode, which only runs on
+# macOS -- same reason build-apk.yml runs on GitHub's servers instead of
+# locally. `macos-latest` runners come with Xcode preinstalled.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Always runs: compiles the app for the iOS Simulator. This needs no
+  # Apple Developer account or signing at all -- it's just a "does this
+  # still build" check, and the resulting .app (zipped up below) is also
+  # what you'd hand to a cloud iOS simulator service like Appetize.io if
+  # you want to try Vault in a browser without any device or Mac at all --
+  # see README-ios.md. Note this is NOT the same file as the .ipa builds
+  # below: a Simulator build only runs in a simulator, never on a real
+  # iPhone, and vice versa -- they're different binary formats entirely.
+  # ---------------------------------------------------------------------
+  build-simulator:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install JS deps
+        run: npm install
+
+      - name: Sync Capacitor web assets into the iOS project
+        run: npx cap sync ios
+
+      - name: Build for iOS Simulator (no signing required)
+        run: |
+          xcodebuild build \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath $RUNNER_TEMP/DerivedData \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Zip the .app for Appetize.io
+        run: |
+          cd "$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator"
+          zip -rq "$RUNNER_TEMP/Vault-simulator.zip" App.app
+
+      - name: Upload Simulator build
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-ios-simulator-app
+          path: ${{ runner.temp }}/Vault-simulator.zip
+
+  # ---------------------------------------------------------------------
+  # No Apple Developer Program needed for this one -- it builds for a real
+  # device but skips code signing entirely at build time, producing an
+  # unsigned .ipa. That can't be installed as-is (iOS refuses to run
+  # anything with no valid signature at all), but a resigning tool like
+  # Sideloadly or AltStore can take it, sign it with nothing more than your
+  # own free Apple ID, and push it straight onto your iPhone over USB or
+  # WiFi -- see README-ios.md for the free-account limits (7-day resign
+  # cycle, 3 sideloaded apps at once) and step-by-step instructions.
+  # ---------------------------------------------------------------------
+  build-unsigned-ipa:
+    runs-on: macos-latest
+    needs: build-simulator
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install JS deps
+        run: npm install
+
+      - name: Sync Capacitor web assets into the iOS project
+        run: npx cap sync ios
+
+      - name: Archive without signing
+        run: |
+          xcodebuild archive \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/VaultUnsigned.xcarchive \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      # An .ipa is just a zip of a "Payload" folder containing the .app --
+      # this is the standard trick for producing one straight from an
+      # unsigned archive without ever running -exportArchive (which refuses
+      # to run without a signing identity).
+      - name: Package as .ipa
+        run: |
+          cd $RUNNER_TEMP
+          mkdir -p Payload
+          cp -r VaultUnsigned.xcarchive/Products/Applications/App.app Payload/
+          zip -rq VaultUnsigned.ipa Payload
+
+      - name: Upload unsigned .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-ios-unsigned-ipa
+          path: ${{ runner.temp }}/VaultUnsigned.ipa
+
+  # ---------------------------------------------------------------------
+  # GitHub Actions doesn't allow referencing `secrets` directly inside a
+  # job's `if:` condition (it fails workflow validation entirely, not just
+  # at runtime) -- so this cheap little job checks for the signing secrets
+  # inside a step's `env`, where secrets ARE allowed, and exposes the
+  # result as a plain job output that build-signed's `if:` can read
+  # instead.
+  # ---------------------------------------------------------------------
+  check-signing-secrets:
+    runs-on: ubuntu-latest
+    outputs:
+      has_secrets: ${{ steps.check.outputs.has_secrets }}
+    steps:
+      - id: check
+        env:
+          CERT_B64: ${{ secrets.IOS_DIST_CERTIFICATE_BASE64 }}
+          PROFILE_B64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+          TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          if [ -n "$CERT_B64" ] && [ -n "$PROFILE_B64" ] && [ -n "$TEAM_ID" ]; then
+            echo "has_secrets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_secrets=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------
+  # Only runs once you've added signing secrets (see README-ios.md) --
+  # produces a real signed .ipa you can install via TestFlight or ad-hoc
+  # distribution. Until those secrets exist this job is skipped, not
+  # failed, so pushing to GitHub before you've enrolled in the Apple
+  # Developer Program still works fine (you just get the simulator build).
+  # ---------------------------------------------------------------------
+  build-signed:
+    runs-on: macos-latest
+    needs: [build-simulator, check-signing-secrets]
+    if: needs.check-signing-secrets.outputs.has_secrets == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install JS deps
+        run: npm install
+
+      - name: Sync Capacitor web assets into the iOS project
+        run: npx cap sync ios
+
+      # Standard GitHub Actions pattern for iOS signing: decode the .p12
+      # distribution certificate and .mobileprovision profile from repo
+      # secrets, load them into a fresh temporary keychain so xcodebuild
+      # can find them, and drop the profile where Xcode looks for it.
+      - name: Install signing certificate and provisioning profile
+        env:
+          CERT_B64: ${{ secrets.IOS_DIST_CERTIFICATE_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.IOS_DIST_CERTIFICATE_PASSWORD }}
+          PROFILE_B64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD || 'temporary-ci-keychain-password' }}
+        run: |
+          CERT_PATH=$RUNNER_TEMP/dist_certificate.p12
+          PROFILE_PATH=$RUNNER_TEMP/profile.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/vault-signing.keychain-db
+
+          echo -n "$CERT_B64" | base64 --decode -o "$CERT_PATH"
+          echo -n "$PROFILE_B64" | base64 --decode -o "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
+
+          mkdir -p ~/Library/MobileDevice/"Provisioning Profiles"
+          cp "$PROFILE_PATH" ~/Library/MobileDevice/"Provisioning Profiles"/vault.mobileprovision
+
+      - name: Write ExportOptions.plist
+        env:
+          TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          # "ad-hoc" installs directly on devices you've registered in the
+          # Apple Developer portal (no App Store/TestFlight review) --
+          # switch to "app-store" here if you set up a TestFlight upload
+          # step yourself later.
+          EXPORT_METHOD: ${{ vars.IOS_EXPORT_METHOD || 'ad-hoc' }}
+        run: |
+          cat > $RUNNER_TEMP/ExportOptions.plist << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${EXPORT_METHOD}</string>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Archive
+        run: |
+          xcodebuild archive \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/Vault.xcarchive \
+            -destination "generic/platform=iOS" \
+            DEVELOPMENT_TEAM=${{ secrets.IOS_TEAM_ID }} \
+            CODE_SIGN_STYLE=Manual
+
+      - name: Export signed .ipa
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/Vault.xcarchive \
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
+            -exportPath $RUNNER_TEMP/export
+
+      - name: Upload .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-ios-ipa
+          path: ${{ runner.temp }}/export/*.ipa
