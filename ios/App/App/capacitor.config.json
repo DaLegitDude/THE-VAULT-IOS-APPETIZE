@@ -1,0 +1,7 @@
+{
+	"appId": "fun.thevaulthub.vault.mobile",
+	"appName": "Vault",
+	"webDir": "www",
+	"bundledWebRuntime": false,
+	"packageClassList": []
+}

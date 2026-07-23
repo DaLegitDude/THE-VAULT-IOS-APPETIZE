@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Vault</title>
+<meta name="theme-color" content="#07070a" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ============ LOGIN (shown first, every launch until an identity is
+     saved on this device — same name/role/admin-code pattern as the
+     desktop app's login screen) ============ -->
+<div id="loginScreen" class="setup-screen" hidden>
+  <div class="setup-card">
+    <div class="brand-mark">V</div>
+    <h1>Welcome to Vault</h1>
+    <p class="setup-tag">What should we call you?</p>
+    <input id="loginName" class="filter" placeholder="e.g. nightowl_22" autocomplete="off" style="margin-bottom:14px" />
+    <div class="role-toggle" id="roleToggle">
+      <button class="role-btn active" data-role="admin" type="button">Enter as Admin</button>
+      <button class="role-btn" data-role="member" type="button">Enter as Member</button>
+    </div>
+    <label class="setup-tag" id="adminCodeRow" style="display:block; text-align:left; margin:14px 0 0">Admin code
+      <input id="loginAdminCode" class="filter" type="password" placeholder="Required for Admin" autocomplete="off" style="margin-top:6px" />
+    </label>
+    <p id="loginError" class="setup-error" hidden></p>
+    <button id="btnEnterVault" class="primary-btn" style="margin-top:16px">Enter Vault</button>
+    <p class="setup-tag" style="margin-top:16px; margin-bottom:0">Ask a Vault admin for the admin code if you need one — it's not shown here on purpose.</p>
+  </div>
+</div>
+
+<!-- ============ SETUP (shown until a local music folder is picked) ============ -->
+<div id="setupScreen" class="setup-screen" hidden>
+  <div class="setup-card">
+    <div class="brand-mark">V</div>
+    <h1>Point Vault at your music</h1>
+    <p class="setup-tag" id="setupTag">Pick a folder laid out like <code>Artist/Era/track.mp3</code> — same as the desktop app. This only needs to be done once on this device.</p>
+    <p id="setupError" class="setup-error" hidden></p>
+    <button id="btnPickFolder" class="primary-btn">Select music folder…</button>
+    <button id="btnReconnectFolder" class="primary-btn" hidden>Reconnect to your library</button>
+    <p id="setupUnsupported" class="setup-error" hidden>
+      Local folder access isn't available here. Reinstall from the compiled Vault .apk (this build uses Android's own folder picker), or use the desktop Vault app on Windows/Mac/Linux instead.
+    </p>
+  </div>
+</div>
+
+<!-- ============ APP SHELL ============ -->
+<div id="appShell" class="app-shell" hidden>
+
+  <header id="topbar">
+    <div class="brand"><span class="brand-mark">V</span>AULT</div>
+    <div id="libraryName" class="library-name"></div>
+    <button id="btnChangeFolder" class="ghost-btn small">Change folder…</button>
+  </header>
+
+  <div class="shell-body">
+    <main id="views">
+
+      <!-- HOME / DASHBOARD -->
+      <section id="view-home" class="view active">
+        <div class="section-eyebrow">// WELCOME</div>
+        <h1 id="homeGreeting">Vault</h1>
+        <p class="section-sub">Jump back in.</p>
+        <div class="dashboard-tiles" id="dashboardTiles"></div>
+      </section>
+
+      <!-- LIBRARY -->
+      <section id="view-library" class="view">
+        <div class="crumbs" id="libCrumbs"></div>
+        <h1 id="libTitle">Library</h1>
+        <input id="libFilter" class="filter" placeholder="Filter this view..." autocomplete="off" />
+        <div class="grid" id="libGrid"></div>
+        <div class="empty-hint" id="libEmptyHint" hidden>Nothing here yet.</div>
+        <div class="loading-hint" id="libLoadingHint" hidden>Reading your music folder…</div>
+      </section>
+
+      <!-- RADIO -->
+      <section id="view-radio" class="view">
+        <div class="section-eyebrow">// 24/7</div>
+        <h1>VAULT RADIO</h1>
+        <p class="section-sub">Shuffle your whole library, or pick an artist to shuffle just their catalog.</p>
+        <button id="btnShuffleAll" class="primary-btn" style="margin-bottom:22px">Start Radio — Shuffle All</button>
+        <div class="grid radio-grid" id="radioGrid"></div>
+        <div class="now-playing" id="nowPlaying" hidden>
+          <div class="now-playing-head">
+            <span class="live-dot"></span>
+            <span id="nowPlayingStation">—</span>
+            <button id="btnShuffleStation" class="ghost-btn">Reshuffle</button>
+          </div>
+          <div class="queue-list" id="queueList"></div>
+        </div>
+      </section>
+
+      <!-- PLAYLISTS -->
+      <section id="view-playlists" class="view">
+        <div id="playlistsBrowse">
+          <div class="section-eyebrow">// YOURS</div>
+          <h1>Playlists</h1>
+          <button id="btnCreatePlaylist" class="primary-btn" style="margin-bottom:22px">+ Create Playlist</button>
+          <div class="grid" id="playlistsGrid"></div>
+          <div class="empty-hint" id="playlistsEmptyHint" hidden>No playlists yet — create one above.</div>
+        </div>
+        <div id="playlistDetail" hidden>
+          <button id="btnBackToPlaylists" class="ghost-btn" style="margin-bottom:18px">&larr; All Playlists</button>
+          <div class="playlist-head">
+            <div class="playlist-cover-wrap">
+              <div class="playlist-cover" id="plCoverBox"><img id="plCoverImg" hidden /></div>
+            </div>
+            <div class="playlist-head-info">
+              <h1 id="plName">—</h1>
+              <p id="plDesc" class="section-sub"></p>
+              <div class="playlist-actions">
+                <button id="btnPlayPlaylist" class="ghost-btn">Play</button>
+                <button id="btnDeletePlaylist" class="ghost-btn danger-text">Delete</button>
+              </div>
+            </div>
+          </div>
+          <div class="queue-list" id="plTrackList"></div>
+          <div class="add-track-picker">
+            <div class="field-label" style="font-size:13px;font-weight:600;margin-bottom:8px">Add from library</div>
+            <div class="picker-row">
+              <select id="plAddArtist"><option value="">Artist…</option></select>
+              <select id="plAddEra"><option value="">Era…</option></select>
+              <select id="plAddTrack"><option value="">Track…</option></select>
+              <button id="btnAddTrackToPlaylist" class="ghost-btn">Add</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SEARCH -->
+      <section id="view-search" class="view">
+        <div class="section-eyebrow">// FIND</div>
+        <h1>Search</h1>
+        <input id="globalSearch" class="filter" placeholder="Search artists, eras, tracks..." autocomplete="off" />
+        <div id="searchResults"></div>
+      </section>
+
+      <!-- SETTINGS -->
+      <!-- Accent color and playback defaults are local to this device
+           (localStorage), same as the rest of this build. Identity (name +
+           admin/member role) is also device-local — see loginScreen — since
+           there's still no backend here, just a saved local choice, not a
+           real account. Desktop's Settings also has Discord Rich
+           Presence — that one doesn't apply here (no local Discord IPC
+           socket reachable from an Android WebView). -->
+      <section id="view-settings" class="view">
+        <div class="section-eyebrow">// YOU</div>
+        <h1>Settings</h1>
+        <p class="section-sub">Your own preferences for this device.</p>
+
+        <div class="field-row">
+          <div>
+            <div class="field-label">Signed in as</div>
+            <div class="field-desc" id="settingsIdentityDisplay">—</div>
+          </div>
+          <button id="btnSwitchIdentity">Switch identity…</button>
+        </div>
+
+        <div class="field-row" style="margin-top:24px">
+          <div>
+            <div class="field-label">Accent color</div>
+          </div>
+        </div>
+        <div class="swatches" id="settingsSwatches">
+          <button class="swatch" style="--c:#e0223a" data-color="#e0223a"></button>
+          <button class="swatch" style="--c:#2ea043" data-color="#2ea043"></button>
+          <button class="swatch" style="--c:#2f81f7" data-color="#2f81f7"></button>
+          <button class="swatch" style="--c:#a371f7" data-color="#a371f7"></button>
+          <button class="swatch" style="--c:#f0883e" data-color="#f0883e"></button>
+        </div>
+
+        <div class="field-row" style="margin-top:24px">
+          <div>
+            <div class="field-label">Autoplay next track</div>
+            <div class="field-desc">Keep playing through the current library/radio/playlist queue when a track ends.</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="toggleAutoplay" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="field-row" style="margin-top:24px">
+          <div>
+            <div class="field-label">Default volume</div>
+            <div class="field-desc">What the volume slider starts at each time you open Vault.</div>
+          </div>
+          <input type="range" id="defaultVolumeSlider" min="0" max="1" step="0.01" style="max-width:180px" />
+        </div>
+      </section>
+
+    </main>
+
+    <!-- QUEUE DRAWER -->
+    <aside id="queueDrawer" class="queue-drawer" hidden>
+      <div class="drawer-head"><span>Up Next</span><button id="closeQueueDrawer">&#10005;</button></div>
+      <div class="queue-list" id="drawerQueueList"></div>
+    </aside>
+  </div>
+
+  <!-- FULLSCREEN NOW PLAYING -->
+  <div id="fullscreenPlayer" class="fullscreen-player" hidden>
+    <button id="closeFullscreen" class="ghost-btn fs-close">&#10005;</button>
+    <img id="fsCover" class="fs-cover" alt="" />
+    <div class="fs-title" id="fsTitle">—</div>
+    <div class="fs-artist" id="fsArtist">—</div>
+    <div class="fs-controls">
+      <button id="fsPrev">&#9198;</button>
+      <button id="fsPlay">&#9654;</button>
+      <button id="fsNext">&#9197;</button>
+      <button id="fsShare" title="Share this track">&#128279;</button>
+    </div>
+    <div class="seek-row fs-seek">
+      <span id="fsTimeCur">0:00</span>
+      <input type="range" id="fsSeek" min="0" max="100" value="0" />
+      <span id="fsTimeDur">0:00</span>
+    </div>
+  </div>
+
+  <!-- PLAYER BAR -->
+  <footer id="player" hidden>
+    <div class="player-track" id="playerTrackClick" title="Open full-screen player">
+      <img id="playerCover" class="player-cover" alt="" />
+      <div class="player-meta">
+        <div class="player-title" id="playerTitle">Nothing playing</div>
+        <div class="player-artist" id="playerArtist">—</div>
+      </div>
+    </div>
+    <div class="player-controls">
+      <div class="transport">
+        <button id="btnPrev" title="Previous">&#9198;</button>
+        <button id="btnPlay" title="Play/Pause">&#9654;</button>
+        <button id="btnNext" title="Next">&#9197;</button>
+      </div>
+      <div class="seek-row">
+        <span id="timeCur">0:00</span>
+        <input type="range" id="seek" min="0" max="100" value="0" />
+        <span id="timeDur">0:00</span>
+      </div>
+    </div>
+    <div class="player-extra">
+      <button id="btnShareTrack" title="Share this track">&#128279;</button>
+      <button id="btnQueueToggle" title="Queue">&#9776;</button>
+      <div class="player-volume">
+        <span>&#128266;</span>
+        <input type="range" id="volume" min="0" max="1" step="0.01" value="0.8" />
+      </div>
+    </div>
+  </footer>
+
+  <nav id="tabbar">
+    <button class="tab-item active" data-view="home">
+      <span class="tab-icon"><svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 10.5 11 3l8 7.5"/><path d="M5.5 9v9h11V9"/><path d="M9 18v-5h4v5"/></svg></span>
+      <span>Home</span>
+    </button>
+    <button class="tab-item" data-view="library">
+      <span class="tab-icon"><svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="8"/><circle cx="11" cy="11" r="2.4"/></svg></span>
+      <span>Library</span>
+    </button>
+    <button class="tab-item" data-view="radio">
+      <span class="tab-icon"><svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="14" r="1.6" fill="currentColor" stroke="none"/><path d="M7.5 14a3.5 3.5 0 0 1 7 0"/><path d="M4.8 14a6.2 6.2 0 0 1 12.4 0"/><path d="M11 8V3"/><path d="M8.5 3h5"/></svg></span>
+      <span>Radio</span>
+    </button>
+    <button class="tab-item" data-view="playlists">
+      <span class="tab-icon"><svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 6h11"/><path d="M4 11h11"/><path d="M4 16h6"/><circle cx="17" cy="16" r="2.2"/><path d="M19.2 16V6l-2.2 1"/></svg></span>
+      <span>Lists</span>
+    </button>
+    <button class="tab-item" data-view="search">
+      <span class="tab-icon"><svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="6.2"/><path d="m19 19-4.5-4.5"/></svg></span>
+      <span>Search</span>
+    </button>
+    <button class="tab-item" data-view="settings">
+      <span class="tab-icon"><svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="2.4"/><path d="M11 3.5v2.2M11 16.3v2.2M18.5 11h-2.2M5.7 11H3.5M16 6l-1.5 1.5M7.5 14.5 6 16M16 16l-1.5-1.5M7.5 7.5 6 6"/></svg></span>
+      <span>Settings</span>
+    </button>
+  </nav>
+
+  <audio id="audio" preload="metadata"></audio>
+</div>
+
+<!-- Generic modal host (create playlist, etc.) -->
+<div id="modalHost" class="modal-host" hidden>
+  <div class="modal-card" id="modalCard"></div>
+</div>
+
+<script src="local-library.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
